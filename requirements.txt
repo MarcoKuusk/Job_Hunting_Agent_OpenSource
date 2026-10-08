@@ -1,0 +1,20 @@
+# Job Hunting Agent dependencies.
+# All of these ship pre-built wheels (no C compiler needed), so they install
+# cleanly on Python 3.14. Versions are left open so pip picks the newest
+# release compatible with your Python.
+
+anthropic            # Claude API — scoring jobs and drafting cover letters
+requests             # HTTP calls to the free job-board APIs and Apify
+feedparser           # Parses the We Work Remotely RSS feed
+PyYAML               # Reads config/profile.yaml and config/search.yaml
+python-dotenv        # Loads your secrets from the .env file
+gspread              # Writes matched jobs to your Google Sheet
+google-auth          # Authenticates gspread with the service-account JSON
+pypdf                # Extracts text from a PDF résumé (pure Python)
+python-docx          # Extracts text from a .docx résumé
+rich                 # Pretty, readable terminal output
+flask                # Local web UI (scripts/run_ui.py) — pure Python
+
+# Note: LinkedIn/Upwork use Apify's REST API via `requests` (above) rather
+# than the apify-client SDK, because that SDK's native dependency (impit) is
+# blocked by some Windows Application Control policies. No extra package needed.

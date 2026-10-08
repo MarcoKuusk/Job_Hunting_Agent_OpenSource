@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Job Hunting Agent</title>
+  <script>
+    // Must run before the stylesheet paints, or a dark-mode user sees a white
+    // flash on every load. Deliberately inline and synchronous.
+    try {
+      var t = localStorage.getItem("theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) { /* private window: fall back to the OS preference */ }
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>🧭 Job Hunting Agent</h1>
+      <p class="sub">I find remote jobs, score how well they fit you, and help you write your application. <strong>I never apply for you</strong> — you always review and submit yourself.</p>
+    </div>
+    <button id="btnTheme" class="theme-toggle" type="button" aria-label="Change colour theme"></button>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="jobs">🔍 Jobs</button>
+    <button class="tab" data-tab="settings">⚙️ Settings</button>
+  </nav>
+
+  <main>
+    <!-- ============ JOBS (the dashboard) ============ -->
+    <section id="jobs" class="panel active">
+      <div id="readyBanner" class="banner loading" hidden>Checking your setup…</div>
+
+      <div class="hero">
+        <p class="hero-lead">Ready to look for work?</p>
+        <button id="btnRunSearch" class="btn big">🔍 Find jobs now</button>
+        <p class="hero-note">I'll search the job boards, score every job against your profile, and list them below.</p>
+        <span id="searchState" class="status-msg"></span>
+
+        <details class="run-options">
+          <summary>Options (you can ignore these)</summary>
+          <p class="cost">💸 A normal search costs about <strong>a few cents</strong> in AI credit, plus roughly <strong>$0.23</strong> for LinkedIn. Tip: tick "Practice run" to try it without spending or saving anything.</p>
+          <label class="check"><input id="dry_run" type="checkbox" /> Practice run <span class="sub-label inline">— try it without saving anything</span></label>
+          <label>Only check the first few jobs <span class="sub-label">Optional. Leave blank to check them all.</span>
+            <input id="limit" type="number" min="1" placeholder="e.g. 10" /></label>
+        </details>
+      </div>
+
+      <div class="card" id="searchProgressCard" hidden>
+        <div class="progress-live" id="searchProgress">
+          <span class="spinner" id="searchSpinner"></span>
+          <span id="searchActivity">Starting…</span>
+        </div>
+        <div id="searchSummary" class="summary"></div>
+        <details class="log-details">
+          <summary>Show technical details</summary>
+          <pre id="searchLog" class="log"></pre>
+        </details>
+      </div>
+
+      <div class="stats" id="statStrip" hidden>
+        <div class="stat good"><div class="num" id="statGreat">0</div><div class="lbl">Great fits</div></div>
+        <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">Jobs found</div></div>
+        <div class="stat"><div class="num" id="statApplied">0</div><div class="lbl">Applied</div></div>
+        <div class="stat"><div class="num" id="statNew">0</div><div class="lbl">Found today</div></div>
+      </div>
+
+      <div class="actions between">
+        <h2>Your jobs</h2>
+        <div class="actions">
+          <button id="btnOpenDashboard" class="btn secondary">📊 My spreadsheet</button>
+          <button id="btnLoadMatches" class="btn secondary">↻ Refresh</button>
+        </div>
+      </div>
+      <p class="hint">Pick one and I'll write your cover letter and tailor your CV to it straight away.</p>
+
+      <div class="filterbar">
+        <div class="chips" id="fitChips"></div>
+        <span class="spacer"></span>
+        <input id="fSearch" type="search" placeholder="Search job or company…" aria-label="Search jobs" />
+        <select id="fSource" aria-label="Filter by job board"></select>
+        <select id="fSort" aria-label="Sort jobs">
+          <option value="score">Best fit first</option>
+          <option value="date">Newest first</option>
+        </select>
+        <label class="check"><input id="fHideApplied" type="checkbox" /> Hide applied</label>
+      </div>
+
+      <div id="jobGrid" class="jobgrid"></div>
+      <div class="showmore"><button id="btnShowMore" class="btn secondary" hidden></button></div>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section id="settings" class="panel settings">
+      <h2>About you</h2>
+      <p class="hint">This is how I understand who you are and what you want. The more accurate it is, the better your matches. For the boxes that say "one per line", just press Enter between items.</p>
+
+      <div class="card">
+        <div class="grid">
+          <label>Your name <input id="name" type="text" placeholder="Your full name" /></label>
+          <label>Where you're based <input id="location" type="text" placeholder="e.g. European Union (remote)" /></label>
+        </div>
+        <label>A short paragraph about you
+          <span class="sub-label">A few sentences on your background and what you're looking for. I use this to score every job.</span>
+          <textarea id="summary" rows="4" placeholder="e.g. Cybersecurity professional focused on GRC, ISO 27001 and NIST. Looking for fully remote roles in the EU or worldwide."></textarea></label>
+        <div class="grid">
+          <label>Job titles you want <span class="sub-label">One per line</span>
+            <textarea id="target_roles" rows="5" placeholder="GRC Analyst&#10;Information Security Officer&#10;Security Researcher"></textarea></label>
+          <label>Your skills <span class="sub-label">One per line</span>
+            <textarea id="skills" rows="5" placeholder="ISO 27001&#10;Risk management&#10;NIST frameworks"></textarea></label>
+        </div>
+        <label>What makes a job a bad fit <span class="sub-label">One per line — these count against a job</span>
+          <textarea id="avoid" rows="3" placeholder="US-only roles&#10;Requires relocation&#10;Night shifts"></textarea></label>
+        <div class="grid">
+          <label class="check"><input id="remote_only" type="checkbox" /> Only show me remote jobs</label>
+          <label>Minimum salary <span class="sub-label">Leave blank if you're flexible</span>
+            <input id="min_salary" type="text" placeholder="e.g. 60000" /></label>
+        </div>
+        <label>Countries / regions you can work from <span class="sub-label">One per line</span>
+          <textarea id="locations_allowed" rows="3" placeholder="European Union&#10;Worldwide (remote)"></textarea></label>
+      </div>
+
+      <div class="card">
+        <h3>Your CV</h3>
+        <p class="hint">Upload your CV as a PDF, Word document, or text file. I read it to tailor your cover letter and CV tips.</p>
+        <div class="upload">
+          <input id="cvFile" type="file" accept=".pdf,.docx,.txt,.md" hidden />
+          <button id="btnChooseCv" class="btn secondary" type="button">📎 Choose file…</button>
+          <span id="cvCurrent" class="cv-current">No CV uploaded yet.</span>
+        </div>
+        <span id="cvStatus" class="status-msg"></span>
+      </div>
+
+      <div class="card">
+        <h3>Search settings</h3>
+        <p class="hint">These control what I look for. The defaults usually work well.</p>
+        <div class="grid">
+          <label>Words a job must mention <span class="sub-label">One per line. A job is skipped unless it mentions at least one — this keeps costs down.</span>
+            <textarea id="keywords" rows="6" placeholder="security&#10;compliance&#10;GRC"></textarea></label>
+          <label>What to search for on the boards <span class="sub-label">One per line — the phrases I type into LinkedIn / Remotive</span>
+            <textarea id="search_terms" rows="6" placeholder="cybersecurity&#10;information security&#10;GRC"></textarea></label>
+        </div>
+
+        <label>What counts as a great fit?
+          <span class="sub-label">Every job I check is saved either way — this just sets which ones show up first, and which get starred in your spreadsheet.</span>
+        </label>
+        <div class="slider-row">
+          <input id="min_score" type="range" min="40" max="95" step="5" />
+          <output id="min_score_label" class="slider-label"></output>
+        </div>
+
+        <fieldset>
+          <legend>Where to search</legend>
+          <div id="sourceToggles" class="sources"></div>
+        </fieldset>
+      </div>
+
+      <div class="actions sticky-save">
+        <button id="btnSaveProfile" class="btn">💾 Save my settings</button>
+        <span id="saveStatus" class="status-msg"></span>
+      </div>
+
+      <div class="card how">
+        <h3>How it works — 3 simple steps</h3>
+        <ol class="steps">
+          <li><strong>Set up this page</strong> once — tell me about you and upload your CV.</li>
+          <li><strong>Find jobs</strong> — I search and score them. You just press one button.</li>
+          <li><strong>Pick a job</strong> — that's all you do. I write the cover letter and tailor your CV to it; you read them over, then open the page and apply yourself.</li>
+        </ol>
+      </div>
+
+      <details class="setup-details">
+        <summary>Setup details <span class="muted">(only needed if something isn't working)</span></summary>
+        <p class="hint">Green means ready. Red means something needs attention — the note says what.</p>
+        <div id="statusList" class="status-list">Loading…</div>
+        <div class="actions">
+          <button id="btnCheck" class="btn secondary">Test live connections</button>
+        </div>
+        <div id="checkResult" class="status-list"></div>
+      </details>
+    </section>
+  </main>
+
+  <!-- ============ APPLY DRAWER ============ -->
+  <button id="drawerBackdrop" class="backdrop" hidden tabindex="-1" aria-label="Close"></button>
+  <aside id="applyDrawer" class="drawer" hidden role="dialog" aria-modal="true" aria-labelledby="applyJobTitle">
+    <div class="drawer-head">
+      <button id="btnCloseDrawer" class="btn-back" type="button">← Back to jobs</button>
+      <h3 id="applyJobTitle"></h3>
+      <p class="org" id="applyJobOrg"></p>
+    </div>
+
+    <div class="progress-live" id="draftProgress">
+      <span class="spinner" id="draftSpinner"></span>
+      <span id="draftState">Writing your documents…</span>
+    </div>
+
+    <div id="draftResults" hidden>
+      <div class="step">
+        <div class="actions between">
+          <h4>1. Your cover letter</h4>
+          <div class="actions">
+            <button class="btn tiny copy" data-target="coverText">Copy</button>
+            <a id="dlCover" class="btn tiny" download>⬇ Download (Word)</a>
+          </div>
+        </div>
+        <p class="hint">Read it through and change anything that doesn't sound like you.</p>
+        <textarea id="coverText" rows="16"></textarea>
+      </div>
+
+      <div class="step">
+        <div class="actions between">
+          <h4>2. Your CV, tailored to this job</h4>
+          <div class="actions">
+            <button class="btn tiny copy" data-target="cvText">Copy</button>
+            <a id="dlCv" class="btn tiny" download>⬇ Download (Word)</a>
+          </div>
+        </div>
+        <p class="hint">Same experience as your real CV, reordered and reworded for this posting. Your original CV is untouched. <strong>Check it before you send it.</strong></p>
+        <textarea id="cvText" rows="18"></textarea>
+      </div>
+
+      <details class="log-details">
+        <summary>What I changed, and what to check</summary>
+        <div id="cvNotes" class="notes"></div>
+      </details>
+
+      <p class="savedpaths" id="savedPaths"></p>
+
+      <div class="step-apply">
+        <h4>3. Ready to apply?</h4>
+        <p>This opens the job's page in your browser so <em>you</em> can review and submit. I never submit anything for you.</p>
+        <div class="actions">
+          <button id="btnOpen" class="btn">🌐 Open the job page</button>
+          <button id="btnApplied" class="btn secondary">✓ I've applied</button>
+          <button id="btnRedraft" class="btn secondary">↻ Write them again</button>
+          <span id="applyState" class="status-msg"></span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

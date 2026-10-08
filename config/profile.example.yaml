@@ -1,0 +1,12 @@
+# Fictional starter settings. Personal edits belong in profile.yaml (ignored).
+name: ""
+location: ""
+summary: ""
+target_roles: []
+skills: []
+requirements:
+  remote_only: true
+  min_salary: ""
+  locations_allowed: []
+avoid: []
+cv_path: data/resume.pdf

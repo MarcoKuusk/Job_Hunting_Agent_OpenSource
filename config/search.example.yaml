@@ -1,0 +1,28 @@
+# Copy to search.yaml (ignored) to customize your search.
+sources:
+  remoteok: true
+  arbeitnow: true
+  remotive: true
+  weworkremotely: true
+  linkedin: false
+  upwork: false
+keywords: []
+exclude_keywords: []
+scoring:
+  min_score: 70
+  scoring_model: claude-haiku-4-5
+  max_jobs_per_source: 150
+documents:
+  drafting_model: claude-opus-4-8
+apify:
+  linkedin_actor: ""
+  upwork_actor: ""
+  results_per_actor: 150
+  reuse_within_hours: 12
+  locations: []
+  work_type: [remote]
+  published_at: r604800
+  search_terms: []
+telegram:
+  enabled: false
+  notify_top_n: 5

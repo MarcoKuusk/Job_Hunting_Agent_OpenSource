@@ -1,0 +1,56 @@
+# =====================================================================
+#  SECRETS — never commit these. Double-checked by scripts/check_setup.py
+# =====================================================================
+.env
+.env.*
+*.env
+!.env.example
+
+# Google service-account JSON and any other credentials
+credentials/*
+!credentials/.gitkeep
+
+# Your CV / résumé and the local "already seen" cache live in data/.
+# Ignore EVERYTHING in data/ except the placeholder, so a résumé dropped
+# in here (any file type) can never be committed by accident.
+data/*
+!data/.gitkeep
+
+# Generated cover letters / CV suggestions
+output/*
+!output/.gitkeep
+
+# =====================================================================
+#  Python
+# =====================================================================
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# =====================================================================
+#  OS / editor noise
+# =====================================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Personal settings are local; publish only the example templates.
+/config/profile.yaml
+/config/search.yaml
+.claude/
+.codex/
+.agents/
+.aws/
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite*
+*.db
