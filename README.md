@@ -210,14 +210,22 @@ browser. It never submits anything for you.
 
 ## Section 5 — LinkedIn / Upwork via Apify
 
-1. On <https://apify.com>, find a LinkedIn-jobs actor and an Upwork actor (the
-   "Store"). Note each actor's ID (`username/actor-name`).
-2. In `config/search.yaml`, set `apify.linkedin_actor` / `apify.upwork_actor`
-   and flip `sources.linkedin` / `sources.upwork` to `true`.
-3. Open each actor's **Input** tab on Apify and compare the field names to
-   `build_input()` in `src/sources/apify_source.py`. Adjust the keys there so
-   they match your actor exactly. The output normalizer already handles many
-   field-name variants.
+The LinkedIn integration has been tested with Apify's
+[LinkedIn Jobs Scraper](https://apify.com/cheap_scraper/linkedin-job-scraper)
+(`cheap_scraper/linkedin-job-scraper`). It is a community-maintained, paid
+actor, so review its current pricing and input schema before enabling it.
+LinkedIn remains disabled in the public defaults.
+
+1. Copy `config/search.example.yaml` to `config/search.yaml` if you have not
+   already done so.
+2. Set `apify.linkedin_actor` to `cheap_scraper/linkedin-job-scraper`, add your
+   own `APIFY_API_TOKEN` to `.env`, and set `sources.linkedin` to `true`.
+3. For Upwork, choose an actor from the [Apify Store](https://apify.com/store),
+   set `apify.upwork_actor` to its ID (`username/actor-name`), and enable the
+   source.
+4. When using a different actor, compare its **Input** tab with `build_input()`
+   in `src/sources/apify_source.py`. Adjust the input keys to match the actor.
+   The output normalizer already accepts many field-name variants.
 
 ---
 

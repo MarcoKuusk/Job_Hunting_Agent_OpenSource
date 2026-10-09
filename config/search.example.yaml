@@ -15,7 +15,7 @@ scoring:
 documents:
   drafting_model: claude-opus-4-8
 apify:
-  linkedin_actor: ""
+  linkedin_actor: cheap_scraper/linkedin-job-scraper
   upwork_actor: ""
   results_per_actor: 150
   reuse_within_hours: 12
