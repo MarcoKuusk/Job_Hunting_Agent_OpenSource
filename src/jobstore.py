@@ -1,7 +1,8 @@
 """Keeps the FULL details of every job we score, so the apply step can draft
 from the real posting rather than just its title.
 
-The Google Sheet holds a summary row (title, company, score, url) — a job
+When Google Sheets is connected, it holds a summary row (title, company, score,
+url) — a job
 description is far too long for a spreadsheet cell to stay readable. But a
 cover letter written from a title alone is generic and useless, so every run
 also stashes the complete Job record here, keyed by URL.

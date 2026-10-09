@@ -12,17 +12,19 @@ const SOURCE_META = {
 
 // Turns a technical setup-status name into a plain-language problem + fix.
 const SETUP_HELP = {
-  "Claude API key":       { core: true,  msg: "The AI key isn't set up. It lives in the .env file — ask whoever installed this for you." },
-  "Google Sheet ID":      { core: true,  msg: "Your results spreadsheet isn't connected (set in the .env file)." },
-  "Service-account file": { core: true,  msg: "The Google connection file is missing from the credentials folder." },
-  "Résumé / CV":          { core: true,  msg: "You haven't uploaded your CV yet.", tab: "settings" },
-  "Apify token":          { core: false, msg: "The LinkedIn search key isn't set (only needed if LinkedIn search is on)." },
-  "Telegram":             { core: false, msg: "Phone notifications aren't fully set up (optional)." },
+  "Claude API key":       { core: true,  msg: "Add your Anthropic API key in Settings.", tab: "settings" },
+  "Google Sheet ID (optional)":    { core: false, msg: "Google Sheet sync is not connected." },
+  "Google credentials (optional)": { core: false, msg: "Google Sheet sync is not connected." },
+  "Profile":              { core: true,  msg: "Add a short summary and at least one target role.", tab: "settings" },
+  "Search keywords":      { core: true,  msg: "Add at least one keyword so I know which jobs to keep.", tab: "settings" },
+  "Résumé / CV":          { core: true,  msg: "Upload your CV in Settings.", tab: "settings" },
+  "Apify token":          { core: true,  msg: "Add an Apify token or turn off LinkedIn and Upwork.", tab: "settings" },
+  "Telegram":             { core: false, msg: "Add Telegram details if notifications are enabled." },
 };
 
 const PAGE_SIZE = 24;
 
-let MATCH_ROWS = [];       // every job from the spreadsheet
+let MATCH_ROWS = [];       // every locally saved job, plus optional Google updates
 let VISIBLE_ROWS = [];     // MATCH_ROWS after the filter bar
 let MIN_SCORE = 70;        // what counts as a great fit (from the server)
 let SHOWN = PAGE_SIZE;     // how many cards are rendered right now
@@ -137,14 +139,15 @@ async function loadHome() {
 
   // When everything is fine, say nothing at all — a green bar on every visit
   // is just noise on a dashboard the user opens daily.
-  if (coreProblems.length === 0) { banner.hidden = true; return; }
+  if (coreProblems.length === 0) { banner.hidden = true; $("btnRunSearch").disabled = false; return; }
 
   banner.hidden = false;
+  $("btnRunSearch").disabled = true;
   banner.className = "banner notready";
   let html = "⚠️ Let's finish setting up before your first search:";
   html += "<ul>" + coreProblems.map((p) => "<li>" + escapeHtml(p.msg) + "</li>").join("") + "</ul>";
   if (coreProblems.some((p) => p.tab === "settings")) {
-    html += '<button class="btn secondary banner-btn" id="btnFixProfile">Go to your settings →</button>';
+    html += '<button class="btn secondary banner-btn" id="btnFixProfile">Open Settings →</button>';
   }
   banner.innerHTML = html;
   const fix = $("btnFixProfile");
@@ -170,6 +173,78 @@ async function runCheck() {
   $("checkResult").textContent = "Testing your connections…";
   const r = await post("/api/check", {});
   renderStatusList($("checkResult"), r.results || []);
+}
+// ---------- connection setup ----------
+function paintConnectionState(id, configured, savedText, optional) {
+  const el = $(id);
+  el.textContent = configured ? (savedText || "Saved ✓") : (optional ? "Optional — not set" : "Not set");
+  el.className = "connection-state " + (configured ? "ok" : (optional ? "" : "bad"));
+}
+
+function paintGoogleShareHelp(configured) {
+  const help = $("googleShareHelp");
+  const email = configured.google_service_email || "";
+  if (!email) { help.hidden = true; help.textContent = ""; return; }
+  help.hidden = false;
+  help.innerHTML = "Now share your Google Sheet as <strong>Editor</strong> with: <code>" +
+    escapeHtml(email) + "</code>";
+}
+
+async function loadConnections() {
+  const result = await api("/api/connections");
+  const configured = result.configured || {};
+  paintConnectionState("anthropicState", configured.anthropic_key);
+  paintConnectionState("googleSheetState", configured.google_sheet_id, "Saved ✓", true);
+  paintConnectionState("googleCredentialsState", configured.google_credentials,
+    configured.google_credentials_name ? "Uploaded: " + configured.google_credentials_name + " ✓" : "Uploaded ✓", true);
+  paintConnectionState("apifyState", configured.apify_token, "Saved ✓", true);
+  paintConnectionState("telegramTokenState", configured.telegram_token, "Saved ✓", true);
+  paintConnectionState("telegramChatState", configured.telegram_chat_id, "Saved ✓", true);
+  paintGoogleShareHelp(configured);
+  $("btnOpenDashboard").hidden = !(configured.google_sheet_id && configured.google_credentials);
+}
+
+async function saveConnections() {
+  const payload = {
+    anthropic_key: $("anthropicKey").value,
+    google_sheet_id: $("googleSheetId").value,
+    apify_token: $("apifyToken").value,
+    telegram_token: $("telegramToken").value,
+    telegram_chat_id: $("telegramChatId").value,
+  };
+  setMsg($("connectionStatus"), "Saving…");
+  const result = await post("/api/connections", payload);
+  if (!result.ok) {
+    setMsg($("connectionStatus"), result.error || "Could not save connection details.", "bad");
+    return;
+  }
+  ["anthropicKey", "googleSheetId", "apifyToken", "telegramToken", "telegramChatId"]
+    .forEach((id) => { $(id).value = ""; });
+  setMsg($("connectionStatus"), "Saved locally ✓", "ok");
+  await loadConnections();
+  loadHome();
+}
+
+async function uploadGoogleCredentials(file) {
+  if (!file) return;
+  setMsg($("connectionStatus"), "Checking and saving the Google file…");
+  const form = new FormData();
+  form.append("credentials", file);
+  let result = {};
+  try {
+    const response = await fetch("/api/upload-google-credentials", { method: "POST", body: form });
+    result = await response.json();
+  } catch (error) {
+    result = { ok: false, error: "Could not upload the file: " + error.message };
+  }
+  $("googleCredentialsFile").value = "";
+  if (!result.ok) {
+    setMsg($("connectionStatus"), result.error || "Could not save the Google file.", "bad");
+    return;
+  }
+  setMsg($("connectionStatus"), "Google file saved ✓", "ok");
+  await loadConnections();
+  loadHome();
 }
 
 // ---------- profile ----------
@@ -325,7 +400,10 @@ function renderSearchSummary(r) {
   if (more) html += `, plus ${more} more worth a look`;
   html += ".";
   if (r.dry_run) html += " This was a practice run, so nothing was saved.";
-  else if (!r.scored_disabled) html += ` ${r.logged} saved to your spreadsheet.`;
+  else if (!r.scored_disabled) {
+    html += ` ${r.saved} saved on this computer.`;
+    if (r.logged) html += ` ${r.logged} synced to Google Sheets.`;
+  }
   html += ` <span class="detail">(Checked ${r.fetched} jobs, scored ${r.scored}.)</span></p>`;
   if (n + more > 0) html += `<p>Your jobs are listed below. 👇</p>`;
   if (r.errors && r.errors.length) {
@@ -340,10 +418,11 @@ async function loadMatches() {
   const r = await api("/api/matches");
   if (!r.ok) {
     $("jobGrid").innerHTML = `<p class="status-msg bad">${escapeHtml(
-      r.error || "I couldn't read your jobs from the spreadsheet.")}</p>`;
+      r.error || "I couldn't read your saved jobs.")}</p>`;
     return;
   }
   MATCH_ROWS = r.rows || [];
+  setMsg($("searchState"), r.warning || "", r.warning ? "bad" : "");
   if (typeof r.min_score === "number") MIN_SCORE = r.min_score;
   renderStats(r.counts || {});
   buildSourceOptions();
@@ -619,7 +698,7 @@ async function markApplied() {
   const url = $("btnApplied").dataset.url;
   const r = await post("/api/mark-applied", { url });
   const good = r.ok && r.updated;
-  setMsg($("applyState"), good ? "Marked as applied ✓" : (r.ok ? "Couldn't find that job in the spreadsheet." : (r.error || "Failed")),
+  setMsg($("applyState"), good ? "Marked as applied ✓" : (r.ok ? "Couldn't find that job in your saved jobs." : (r.error || "Failed")),
     good ? "ok" : "bad");
   if (good) loadMatches();
 }
@@ -645,6 +724,9 @@ document.querySelectorAll(".copy").forEach((btn) => {
 // ---------- wire up ----------
 $("btnTheme").addEventListener("click", cycleTheme);
 $("btnCheck").addEventListener("click", runCheck);
+$("btnSaveConnections").addEventListener("click", saveConnections);
+$("btnChooseGoogleCredentials").addEventListener("click", () => $("googleCredentialsFile").click());
+$("googleCredentialsFile").addEventListener("change", (e) => uploadGoogleCredentials(e.target.files[0]));
 $("btnChooseCv").addEventListener("click", () => $("cvFile").click());
 $("cvFile").addEventListener("change", (e) => uploadCv(e.target.files[0]));
 $("min_score").addEventListener("input", () => { $("min_score_label").textContent = pickyLabel($("min_score").value); });
@@ -686,9 +768,10 @@ document.querySelector(".setup-details").addEventListener("toggle", (e) => {
 async function checkServerIsCurrent() {
   const r = await api("/api/version");
   const features = r.features || [];
-  if (features.includes("dashboard-v2")) return true;
+  if (features.includes("guided-setup")) return true;
   const banner = $("readyBanner");
   banner.hidden = false;
+  $("btnRunSearch").disabled = true;
   banner.className = "banner notready";
   banner.innerHTML = "⚠️ This page is newer than the app that's running." +
     "<ul><li>Close <strong>every</strong> Job Finder window (the black ones).</li>" +
@@ -707,6 +790,7 @@ async function checkServerIsCurrent() {
 
   if (!(await checkServerIsCurrent())) return;
   loadHome();
+  loadConnections();
   loadProfile();
   loadMatches();
 })();

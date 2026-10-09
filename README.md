@@ -1,263 +1,264 @@
 # Job Hunting Agent
 
-A personal job-search assistant. It:
+Job Hunting Agent finds remote jobs, scores how well they match you, saves
+them on your computer, optionally syncs them to Google Sheets, and prepares a
+cover letter and tailored CV when you pick a job.
 
-1. **Searches** remote job boards — RemoteOK, Arbeitnow, Remotive, We Work
-   Remotely (free APIs/RSS), plus **LinkedIn and Upwork via Apify actors**.
-2. **Scores** each job against your CV and profile using Claude (Anthropic).
-3. **Logs** good matches to a Google Sheet, and keeps a **Dashboard** tab there
-   (counters, best matches still to review, charts) that updates by itself.
-4. **Helps you apply**: pick a job and it writes a tailored cover letter *and* a
-   version of your CV rewritten for that posting, both downloadable as Word files.
+It runs on your own computer. It never submits an application or sends a
+message for you. You review everything and apply yourself.
 
-> **It never applies for you.** The assistant only prepares drafts and, after
-> you explicitly type `approve`, opens a job's application page in your browser
-> so *you* can review and submit it yourself. It never submits a form or sends
-> an email on its own.
+## What you need
 
----
+- A Windows, macOS, or Linux computer with internet access.
+- [Python 3.11 or newer](https://www.python.org/downloads/).
+- An [Anthropic API key](https://platform.claude.com/settings/keys) for scoring
+  jobs and writing application documents.
 
-## The easy way — the web UI
+Anthropic charges for API use. The four built-in public job boards are free.
+LinkedIn and Upwork are optional and use paid Apify actors. The app shows which
+sources cost money before you enable them.
 
-After the one-time setup (Section 1 below), you can do everything from a local
-web page instead of the command line. **Just double-click `Start Job Finder.bat`**
-in the project folder — it starts the app and opens your browser. (Tip: right-click
-it → *Send to → Desktop (create shortcut)* to get a desktop icon. Closing the
-black window stops the app.)
+## Easiest setup on Windows
 
-Or from a terminal:
+1. On this GitHub page, select **Code → Download ZIP**.
+2. Open the downloaded ZIP and select **Extract all**. Do not run the app from
+   inside the ZIP.
+3. Install [Python](https://www.python.org/downloads/) if needed. During the
+   Windows installer, tick **Add python.exe to PATH**.
+4. In the extracted folder, double-click **Start Job Finder.bat**.
+5. Leave the black window open. The first start creates a private Python
+   environment and installs the required packages, so it can take a few
+   minutes. Your browser opens automatically when it is ready.
+6. Open **Settings** and complete the four numbered steps:
+   - save your Anthropic API key;
+   - fill in your profile and upload your CV;
+   - add search keywords and choose job boards;
+   - optionally connect Google Sheets, Apify, or Telegram.
+7. Select **Test live connections**. When Claude is green, open **Jobs** and
+   select **Find jobs now**. Results are saved on your computer automatically.
 
-```bash
-python scripts/run_ui.py
-```
+After the first setup, start the app by double-clicking **Start Job Finder.bat**.
+The launcher checks for dependency updates automatically and never overwrites
+your keys, profile, CV, or results.
 
-It opens `http://127.0.0.1:5000` in your browser — **local only, nothing is
-exposed to the internet** — with three tabs:
+> Windows may show a security warning for a downloaded `.bat` file. Only run a
+> copy downloaded from this repository. Select **More info → Run anyway** if
+> Windows SmartScreen appears.
 
-1. **Profile** — edit your background, skills, keywords, and match threshold; see
-   your setup status; save with one button.
-2. **Find jobs** — run a search (with a cost estimate) and see the matches from
-   your Google Sheet.
-3. **Apply** — pick a match and that's it: the cover letter and a CV tailored to
-   that job are written straight away, ready to read, edit and download as Word
-   files. Then you open the job's page and apply yourself. (It never submits —
-   same rule as everywhere else.)
+## macOS and Linux
 
-The command-line scripts below do exactly the same things if you prefer them.
-
----
-
-## Repo layout
-
-```
-config/profile.example.yaml   public profile template
-config/search.example.yaml    public search template
-config/profile.yaml           your private background (gitignored)
-config/search.yaml            your private search settings (gitignored)
-data/                 put your résumé here (gitignored)
-credentials/          Google service-account JSON goes here (gitignored)
-output/               generated cover letters / tailored CVs (gitignored)
-src/                  all the logic
-scripts/              the commands you run:
-    run_ui.py             launch the web UI (easiest — see below)
-    check_setup.py        verify everything is configured
-    run_search.py         run a search
-    run_apply_assistant.py prepare an application
-webapp/               the local web UI (Flask)
-tests/                offline tests (no network/keys needed)
-```
-
----
-
-## Quick start
+Download and extract the ZIP, or clone the repository, then open a terminal in
+its folder and run:
 
 ```bash
-# 1. Create a virtual environment and install dependencies
-python -m venv .venv
-.venv\Scripts\activate          # Windows (PowerShell/CMD)
-# source .venv/bin/activate     # macOS/Linux
-pip install -r requirements.txt
-
-# 2. Set up credentials  ->  see "Section 1" below
-copy .env.example .env          # Windows   (cp on macOS/Linux)
-#   ...then edit .env with your keys
-
-# 3. Verify everything
-python scripts/check_setup.py
-
-# 4. Save your profile in the UI, or copy and edit the templates:
-copy config\profile.example.yaml config\profile.yaml
-copy config\search.example.yaml config\search.yaml
-# macOS/Linux: use cp instead of copy, and / instead of \
-
-# 5. Run a cheap test search
-python scripts/run_search.py --dry-run --limit 5
-
-# 6. Run for real
-python scripts/run_search.py
-
-# 7. Prepare an application
-python scripts/run_apply_assistant.py
+chmod +x start-job-finder.sh
+./start-job-finder.sh
 ```
 
----
+The script creates `.venv`, installs dependencies, creates private local config
+files, starts the app, and opens `http://127.0.0.1:5000`.
 
-## Section 1 — Credentials & the `.env` file
-
-All secrets live in a file called `.env` in the project root. It is **gitignored**
-and must never be committed or shared. Create it by copying the template:
+To clone instead of downloading the ZIP:
 
 ```bash
-copy .env.example .env      # Windows
-# cp .env.example .env      # macOS/Linux
+git clone https://github.com/MarcoKuusk/Job_Hunting_Agent_OpenSource.git
+cd Job_Hunting_Agent_OpenSource
+./start-job-finder.sh
 ```
 
-Then open `.env` in a text editor and fill in each value. Here's what each one
-is and where to get it:
+## Optional: connect Google Sheets
 
-### 1a. `ANTHROPIC_API_KEY` (required)
-Powers the scoring and the cover-letter drafting.
-1. Go to <https://platform.claude.com> and sign in.
-2. **API keys → Create key**.
-3. Copy the key (starts with `sk-ant-`) and paste it after `ANTHROPIC_API_KEY=`.
-> Claude usage costs money per request. Scoring uses the cheap `claude-haiku-4-5`
-> model; you can set a `max_jobs_per_source` cap in `config/search.yaml`.
+Job Finder works without Google: results appear in the local Jobs page.
+Connect Google only if you also want a spreadsheet dashboard. The same
+checklist appears in Settings.
 
-### 1b. Google Sheets — `GOOGLE_SERVICE_ACCOUNT_FILE` + `GOOGLE_SHEET_ID` (required)
-Matches are written to a Google Sheet via a "service account" (a robot Google
-account).
-1. Create a sheet at <https://sheets.google.com> — name it anything. Copy its ID
-   from the URL: `https://docs.google.com/spreadsheets/d/`**`THIS_PART`**`/edit`.
-   Paste it after `GOOGLE_SHEET_ID=`.
-2. Go to <https://console.cloud.google.com> → create (or pick) a project.
-3. **APIs & Services → Library** → enable **Google Sheets API** *and*
-   **Google Drive API**.
-4. **APIs & Services → Credentials → Create credentials → Service account.**
-   Give it a name and create it.
-5. Open the service account → **Keys → Add key → Create new key → JSON**.
-   A `.json` file downloads.
-6. Move that file into the `credentials/` folder. Point `.env` at it:
-   `GOOGLE_SERVICE_ACCOUNT_FILE=credentials/your-file.json`.
-7. **Crucial:** open the JSON and copy the `client_email` value (looks like
-   `…@….iam.gserviceaccount.com`). Back in your Google Sheet, click **Share**
-   and share it with that email as **Editor**. (Otherwise you'll get a
-   permission error.)
+1. Create a spreadsheet at [Google Sheets](https://sheets.google.com/). Copy the
+   text between `/d/` and `/edit` in its URL; that is the **Sheet ID**.
+2. Open [Google Cloud Console](https://console.cloud.google.com/), create or
+   select a project, and enable both **Google Sheets API** and **Google Drive
+   API**.
+3. Open **APIs & Services → Credentials → Create credentials → Service
+   account** and create the account.
+4. Open that service account, then select **Keys → Add key → Create new key →
+   JSON**. Google downloads a JSON file.
+5. In Job Finder Settings, choose **Choose Google JSON file…** and select the
+   downloaded file.
+6. Job Finder displays the service-account email. Return to your spreadsheet,
+   select **Share**, add that email, and grant **Editor** access.
+7. Paste the Sheet ID into Job Finder and select **Save connection details**.
+8. Select **Test live connections**. A 403 error almost always means the Sheet
+   was not shared with the service-account email as Editor.
 
-### 1c. `APIFY_API_TOKEN` (for LinkedIn + Upwork)
-1. Sign up at <https://console.apify.com>.
-2. **Settings → Integrations → API token** (or **API & Integrations**). Copy it.
-3. Paste after `APIFY_API_TOKEN=`.
-> You also pick the actors and set their IDs in `config/search.yaml` — that's
-> Step 5 below. LinkedIn/Upwork stay off until you do.
+The JSON file is copied to the ignored `credentials/` folder. Never publish or
+send that file to anyone. You can skip this whole section and use local storage.
 
-### 1d. Telegram — `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`
-Sends you a summary after each run.
-1. In Telegram, message **@BotFather** → `/newbot` → follow prompts. It gives a
-   token like `123456789:AA...`. Paste after `TELEGRAM_BOT_TOKEN=`.
-2. Message **@userinfobot** in Telegram; it replies with your numeric **Id**.
-   Paste after `TELEGRAM_CHAT_ID=`.
-3. Send your new bot any message once (so it's allowed to message you back).
+## Everyday use
 
-When you've filled everything in, run `python scripts/check_setup.py` — it
-verifies each credential and tells you exactly what (if anything) is wrong,
-without ever printing your secrets.
+1. Double-click **Start Job Finder.bat** on Windows, or run
+   `./start-job-finder.sh` on macOS/Linux.
+2. On **Jobs**, select **Find jobs now**.
+3. Filter the results and choose a job. Job Finder prepares a cover letter and
+   tailored CV for you to review and download.
+4. Select **Open application page** only when you are ready. Job Finder opens
+   the employer's page but never fills or submits it.
+5. Close the black terminal window when finished; that stops the local app.
 
----
+A **Practice run** avoids saving results, but it can still call enabled paid
+services. To minimize cost, set a small job limit or use only the free boards.
 
-## Section 2 — Your profile and search settings
-
-- **`config/profile.yaml`** — who you are: name, summary, target roles, skills,
-  requirements, things to avoid, and the path to your résumé. Drop your résumé
-  (PDF, DOCX, or TXT) into `data/` and set `cv_path` to point at it.
-- **`config/search.yaml`** — which sources are on, your keywords, the minimum
-  score to log a job (`min_score`), the models, and the Apify settings.
-
-Personal settings files are gitignored. A fresh checkout reads the blank profile
-and generic search defaults from `config/*.example.yaml`; saving Settings in
-the UI creates the private files automatically. For command-line setup, copy
-the examples to `config/profile.yaml` and `config/search.yaml` and edit them.
-Set your target roles, keywords, locations and resume before running a search.
-Paid Apify sources and Telegram are disabled until you configure them.
-
----
-
-## Section 3 — Running a search
-
-```bash
-python scripts/run_search.py --dry-run --limit 5   # cheap test, writes nothing
-python scripts/run_search.py --no-score            # just fetch & count, no Claude
-python scripts/run_search.py                        # full run, logs to your sheet
-```
-
-Each run fetches jobs, filters by your keywords, drops jobs seen on previous
-runs (remembered in `data/seen.json`), scores the rest with Claude, and writes
-jobs scoring at/above `min_score` to your sheet.
-
----
-
-## Section 4 — Preparing an application (human-approved)
-
-```bash
-python scripts/run_apply_assistant.py
-```
-
-It lists logged jobs, lets you pick one, writes a cover letter, a tailored CV,
-and a short "what I changed" note into `output/` (Markdown plus Word), and
-**only after you type `approve`** opens the job's application page in your
-browser. It never submits anything for you.
-
----
-
-## Section 5 — LinkedIn / Upwork via Apify
+## Optional LinkedIn, Upwork, and Telegram
 
 The LinkedIn integration has been tested with Apify's
 [LinkedIn Jobs Scraper](https://apify.com/cheap_scraper/linkedin-job-scraper)
-(`cheap_scraper/linkedin-job-scraper`). It is a community-maintained, paid
-actor, so review its current pricing and input schema before enabling it.
-LinkedIn remains disabled in the public defaults.
+(`cheap_scraper/linkedin-job-scraper`). It is a community-maintained paid actor,
+so review its current pricing before enabling LinkedIn. Add your Apify token in
+Settings, then enable LinkedIn under **Where to search**.
 
-1. Copy `config/search.example.yaml` to `config/search.yaml` if you have not
-   already done so.
-2. Set `apify.linkedin_actor` to `cheap_scraper/linkedin-job-scraper`, add your
-   own `APIFY_API_TOKEN` to `.env`, and set `sources.linkedin` to `true`.
-3. For Upwork, choose an actor from the [Apify Store](https://apify.com/store),
-   set `apify.upwork_actor` to its ID (`username/actor-name`), and enable the
-   source.
-4. When using a different actor, compare its **Input** tab with `build_input()`
-   in `src/sources/apify_source.py`. Adjust the input keys to match the actor.
-   The output normalizer already accepts many field-name variants.
+For Upwork, select a compatible actor from the
+[Apify Store](https://apify.com/store), put its `username/actor-name` ID in
+`config/search.yaml`, and enable Upwork. Different actors may require changes
+to `build_input()` in `src/sources/apify_source.py`.
 
----
+Telegram notifications are optional. Create a bot with **@BotFather**, get your
+chat ID from **@userinfobot**, enter both values in Settings, and set
+`telegram.enabled: true` in `config/search.yaml`.
 
-## Section 6 — Run it daily (optional)
+## Where your data goes
 
-**Windows Task Scheduler:** create a Basic Task → Daily → *Start a program*:
-- Program: the full path to `.venv\Scripts\python.exe`
-- Arguments: `scripts\run_search.py`
-- Start in: the project folder
+- Keys and IDs are stored locally in the ignored `.env` file. The Settings page
+  only reports whether each value is saved; it never sends saved values back to
+  the browser.
+- Your profile is stored in ignored files under `config/`.
+- Your CV and generated documents stay in the ignored `data/` and `output/`
+  folders.
+- Scoring and drafting send the relevant profile, CV, and job text to Anthropic.
+- Enabled searches contact their job boards and, when selected, Apify.
+- Job matches are saved locally. If configured, they are also synced to your Google Sheet.
+- The web app binds only to `127.0.0.1`; it is not exposed to your network or
+  the internet.
 
-**macOS/Linux cron** (example, 8am daily):
+See [SECURITY.md](SECURITY.md) for more detail.
+
+## Troubleshooting
+
+### The black window says Python is missing or too old
+
+Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/).
+On Windows, tick **Add python.exe to PATH**, finish the installer, close the old
+black window, and double-click the launcher again.
+
+### Package installation fails
+
+Check your internet connection and run the launcher again. It safely resumes
+setup. On a work-managed computer, application-control or proxy rules may block
+Python packages; copy the complete error from the black window for your system
+administrator.
+
+### The browser does not open
+
+Keep the black window open and visit <http://127.0.0.1:5000> manually. If it
+still does not load, close every Job Finder window, wait a few seconds, and
+start it again.
+
+### Google returns 403 or “permission denied”
+
+Open the service-account JSON or upload it again to see its email, then share
+your spreadsheet with that exact email as **Editor**. Confirm that the Google
+Sheets and Google Drive APIs are enabled in the same Cloud project.
+
+### No jobs appear
+
+In Settings, add at least one broad keyword, save, and confirm at least one free
+source is enabled. Try a small search with RemoteOK, Arbeitnow, Remotive, and We
+Work Remotely before enabling paid sources.
+
+### Claude reports that a model is unavailable
+
+Your Anthropic account may not have access to the configured model. Change
+`scoring.scoring_model` and `documents.drafting_model` in
+`config/search.yaml` to model IDs available to your account, then restart the
+app.
+
+### Start over without deleting personal data
+
+Close Job Finder and delete only the `.venv` folder. The next launch rebuilds
+it. Do not delete `.env`, `config/profile.yaml`, `config/search.yaml`, `data/`,
+`credentials/`, or `output/` unless you intentionally want to remove that data.
+
+## Advanced manual setup
+
+The one-click launcher is recommended. For a manual installation:
+
+```bash
+git clone https://github.com/MarcoKuusk/Job_Hunting_Agent_OpenSource.git
+cd Job_Hunting_Agent_OpenSource
+python -m venv .venv
 ```
-0 8 * * * cd /path/to/Job_Hunting_Agent && .venv/bin/python scripts/run_search.py
+
+Activate the environment with the command for your shell:
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
 ```
 
----
+```bat
+:: Windows Command Prompt
+.venv\Scripts\activate.bat
+```
 
-## Safety notes
+```bash
+# macOS/Linux
+source .venv/bin/activate
+```
 
-- `.env`, personal config files, `credentials/`, your résumé, and `output/` are all gitignored.
-  `check_setup.py` and the search never print secret values.
-- The apply assistant always requires a typed `approve` and never submits an
-  application or sends a message on your behalf.
-- LinkedIn and Upwork are accessed **only** through Apify actors — there is no
-  logged-in scraping or browser automation against those sites.
+Then run:
 
-## Contributing and privacy
+```bash
+pip install -r requirements.txt
+python scripts/bootstrap.py
+python scripts/run_ui.py
+```
 
-See CONTRIBUTING.md and SECURITY.md. Run `python scripts/check_public_release.py`
-before committing. The release repository starts with fresh history; no private
-configuration, resumes, generated output, or original Git metadata is included.
+The command-line tools use the same configuration:
+
+```bash
+python scripts/check_setup.py
+python scripts/run_search.py --no-score
+python scripts/run_search.py --dry-run --limit 5
+python scripts/run_search.py
+python scripts/run_apply_assistant.py
+```
+
+`--no-score` skips Claude scoring. `--dry-run` prevents writes but does not
+prevent API charges. `--limit 5` restricts scoring to five new jobs.
+
+## Project layout
+
+```text
+Start Job Finder.bat       one-click Windows setup and launcher
+start-job-finder.sh        one-command macOS/Linux setup and launcher
+config/*.example.yaml      public configuration templates
+config/*.yaml              your private settings (gitignored)
+credentials/               Google service-account JSON (gitignored)
+data/                      your CV and local job cache (gitignored)
+output/                    generated application documents (gitignored)
+scripts/bootstrap.py       dependency and first-run setup
+scripts/check_setup.py     detailed connection checks
+src/                       search, scoring, storage, and document logic
+webapp/                    local browser interface
+tests/                     offline tests
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Before committing, run:
+
+```bash
+python scripts/check_public_release.py
+python -m unittest discover -s tests
+```
 
 ## License
 
-MIT; see LICENSE.
+MIT; see [LICENSE](LICENSE).

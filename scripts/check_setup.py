@@ -100,17 +100,16 @@ def check_env_and_config():
 
     line("PASS", "config/profile.yaml + config/search.yaml", "parsed")
 
-    # Required secrets (masked).
-    required = {
-        "ANTHROPIC_API_KEY": config.anthropic_key,
-        "GOOGLE_SHEET_ID": config.google_sheet_id,
-    }
-    for name, value in required.items():
-        if value:
-            shown = mask(value) if name == "ANTHROPIC_API_KEY" else value
-            line("PASS", name, shown)
-        else:
-            fail(name, "not set in .env")
+    # Anthropic is required for scoring and drafting. Google is optional because
+    # every scored job is stored locally and browsed in the web UI.
+    if config.anthropic_key:
+        line("PASS", "ANTHROPIC_API_KEY", mask(config.anthropic_key))
+    else:
+        fail("ANTHROPIC_API_KEY", "not set in .env")
+    if config.google_sheet_id or config.google_service_account_path.exists():
+        line("INFO", "Google Sheets", "optional sync is partly or fully configured")
+    else:
+        line("SKIP", "Google Sheets", "optional — jobs will be stored locally")
 
     # Apify / Telegram are required only if those features are on.
     enabled = config.enabled_sources()
@@ -180,6 +179,18 @@ def _service_account_email(config) -> str:
 def check_sheets(config) -> None:
     section("Google Sheets")
     from src.config import scrub
+
+    has_id = bool(config.google_sheet_id)
+    has_file = config.google_service_account_path.exists()
+    if not has_id and not has_file:
+        line("SKIP", "Google Sheets", "optional — jobs will be stored locally")
+        return
+    if not has_id:
+        fail("Google Sheets", "credential file exists but GOOGLE_SHEET_ID is not set")
+        return
+    if not has_file:
+        fail("Google Sheets", "Sheet ID is set but the service-account file is missing")
+        return
 
     try:
         from src.sheets import open_worksheet

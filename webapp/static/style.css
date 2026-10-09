@@ -260,6 +260,23 @@ main { max-width: 1100px; margin: 0 auto; padding: 20px 24px 90px; }
 }
 .card h3 { margin: 0 0 12px; font-size: 1.05rem; }
 .card h4 { margin: 18px 0 6px; font-size: 0.95rem; }
+.setup-card hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+.required-label {
+  display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 999px;
+  background: var(--info-bg); color: var(--accent); font-size: 0.72rem; font-weight: 700;
+}
+.connection-state { display: block; margin-top: 5px; color: var(--muted); font-size: 0.82rem; }
+.connection-state.ok { color: var(--ok); font-weight: 600; }
+.connection-state.bad { color: var(--bad); }
+.callout {
+  margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--info-border);
+  border-radius: 8px; background: var(--info-bg); overflow-wrap: anywhere;
+}
+.inline-help { margin-top: 14px; }
+.inline-help > summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.inline-help ol { padding-left: 22px; }
+.inline-help li { margin: 7px 0; }
+.optional-connections { margin-top: 14px; }
 
 /* ---------- banners ---------- */
 .banner {

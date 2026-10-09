@@ -1,6 +1,6 @@
 # Contributing
 
-Use Python 3.14 and install requirements.txt in a virtual environment.
+Use Python 3.11 or newer and install requirements.txt in a virtual environment.
 Run `python -m unittest discover -s tests` before submitting changes.
 Run `python scripts/check_public_release.py` before committing.
 

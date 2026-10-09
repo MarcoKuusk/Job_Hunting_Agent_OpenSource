@@ -4,7 +4,7 @@
       -> filter by your keywords / exclude list
       -> drop jobs seen on previous runs
       -> score each with Claude
-      -> (unless dry run) save every scored job, log them to the Google Sheet,
+      -> (unless dry run) save every scored job locally and optionally sync Google,
          remember them, notify Telegram about the ones at/above min_score
 
 min_score is not a gate: every job we paid to score is kept, and the threshold
@@ -165,32 +165,32 @@ def run_search(config: Config, *, dry_run: bool = False, no_score: bool = False,
     result.below_threshold = len(loggable) - len(matches)
     result.min_score = min_score
 
-    # 5) Persist results (skipped on a dry run).
+    # 5) Persist results (skipped on a dry run). The local store is the primary
+    # database; Google Sheets is an optional sync for people who configure it.
     if not dry_run:
         from .jobstore import save_jobs
-        from .sheets import append_jobs, build_dashboard
 
         date_found = datetime.now().strftime("%Y-%m-%d")
         if loggable:
-            # Local store FIRST. Keep the full posting (description included)
-            # so the apply step can write a cover letter from the real job ad,
-            # not just its title: the sheet only holds a one-line summary.
-            # Doing this before the network write means a Google outage costs
-            # nothing — we have already paid for these scores.
             result.saved = save_jobs(loggable, date_found=date_found)
+            progress(f"Saved {result.saved} job(s) on this computer.")
+
+        if config.google_sheets_ready():
+            from .sheets import append_jobs, build_dashboard
+
+            if loggable:
+                try:
+                    result.logged = append_jobs(config, loggable, date_found)
+                except Exception as exc:  # noqa: BLE001
+                    result.errors.append("sheet write failed: " + scrub(str(exc)))
+                    progress("  Google sync failed — your jobs are still saved locally.")
             try:
-                result.logged = append_jobs(config, loggable, date_found)
+                progress("Updating your Google dashboard …")
+                build_dashboard(config)
             except Exception as exc:  # noqa: BLE001
-                # Never lose a run's scoring spend to a spreadsheet failure.
-                result.errors.append("sheet write failed: " + scrub(str(exc)))
-                progress("  sheet write failed — your jobs are still saved locally.")
-        # Refresh the Dashboard tab (and the job log's formatting). Cosmetic,
-        # so a failure here must never lose a run's results.
-        try:
-            progress("Updating your dashboard …")
-            build_dashboard(config)
-        except Exception as exc:  # noqa: BLE001
-            result.errors.append("dashboard update failed: " + scrub(str(exc)))
+                result.errors.append("dashboard update failed: " + scrub(str(exc)))
+        else:
+            progress("Google Sheets is not connected; using local storage only.")
         # Remember everything we scored so we don't re-score it next time.
         mark_seen(seen, new_jobs)
         save_seen(seen)
@@ -199,6 +199,6 @@ def run_search(config: Config, *, dry_run: bool = False, no_score: bool = False,
 
         send_summary(config, matches, len(matches))
     else:
-        progress("Dry run: nothing written to the sheet, cache, or Telegram.")
+        progress("Dry run: nothing saved locally, synced to Google, or sent to Telegram.")
 
     return result

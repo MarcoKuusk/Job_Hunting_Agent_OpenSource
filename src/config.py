@@ -104,6 +104,10 @@ class Config:
         p = Path(raw)
         return p if p.is_absolute() else PROJECT_ROOT / p
 
+    def google_sheets_ready(self) -> bool:
+        """Whether optional Google Sheets sync has everything it needs."""
+        return bool(self.google_sheet_id and self.google_service_account_path.is_file())
+
     @property
     def cv_path(self) -> Path:
         raw = (self.profile.get("cv_path") or "data/resume.pdf").strip()

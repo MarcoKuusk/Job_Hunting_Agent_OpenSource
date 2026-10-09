@@ -42,8 +42,8 @@
 
         <details class="run-options">
           <summary>Options (you can ignore these)</summary>
-          <p class="cost">💸 A normal search costs about <strong>a few cents</strong> in AI credit, plus roughly <strong>$0.23</strong> for LinkedIn. Tip: tick "Practice run" to try it without spending or saving anything.</p>
-          <label class="check"><input id="dry_run" type="checkbox" /> Practice run <span class="sub-label inline">— try it without saving anything</span></label>
+          <p class="cost">💸 A normal search costs about <strong>a few cents</strong> in AI credit, plus roughly <strong>$0.23</strong> for LinkedIn. A practice run does not save results, but enabled paid services can still charge for their API calls.</p>
+          <label class="check"><input id="dry_run" type="checkbox" /> Practice run <span class="sub-label inline">— do not save results</span></label>
           <label>Only check the first few jobs <span class="sub-label">Optional. Leave blank to check them all.</span>
             <input id="limit" type="number" min="1" placeholder="e.g. 10" /></label>
         </details>
@@ -71,7 +71,7 @@
       <div class="actions between">
         <h2>Your jobs</h2>
         <div class="actions">
-          <button id="btnOpenDashboard" class="btn secondary">📊 My spreadsheet</button>
+          <button id="btnOpenDashboard" class="btn secondary" hidden>📊 My spreadsheet</button>
           <button id="btnLoadMatches" class="btn secondary">↻ Refresh</button>
         </div>
       </div>
@@ -95,8 +95,68 @@
 
     <!-- ============ SETTINGS ============ -->
     <section id="settings" class="panel settings">
-      <h2>About you</h2>
-      <p class="hint">This is how I understand who you are and what you want. The more accurate it is, the better your matches. For the boxes that say "one per line", just press Enter between items.</p>
+      <h2>Set up Job Finder</h2>
+      <p class="hint">Work through these four steps once. Everything is stored only in this folder on your computer.</p>
+
+      <div class="card setup-card">
+        <h3>1. Add your Anthropic API key</h3>
+        <p class="hint">This is the only connection required. The key is saved locally and hidden after you enter it.</p>
+        <label>Anthropic API key <span class="required-label">required</span>
+          <span class="sub-label">Create one at <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">Anthropic API Keys</a>.</span>
+          <input id="anthropicKey" type="password" autocomplete="new-password" placeholder="Paste a new key to save it" />
+          <span id="anthropicState" class="connection-state"></span>
+        </label>
+        <details class="inline-help optional-panel">
+          <summary>Optional: sync jobs to Google Sheets</summary>
+          <p class="hint">Jobs are already saved on this computer. Complete this section only if you also want a spreadsheet dashboard.</p>
+          <label>Google Sheet ID
+            <span class="sub-label">The text between <code>/d/</code> and <code>/edit</code> in your spreadsheet URL.</span>
+            <input id="googleSheetId" type="password" autocomplete="new-password" placeholder="Paste the sheet ID" />
+            <span id="googleSheetState" class="connection-state"></span>
+          </label>
+          <h4>Google service-account JSON file</h4>
+          <div class="upload">
+            <input id="googleCredentialsFile" type="file" accept=".json,application/json" hidden />
+            <button id="btnChooseGoogleCredentials" class="btn secondary" type="button">Choose Google JSON file…</button>
+            <span id="googleCredentialsState" class="connection-state"></span>
+          </div>
+          <p id="googleShareHelp" class="callout" hidden></p>
+          <ol>
+            <li>Create a spreadsheet at <a href="https://sheets.google.com" target="_blank" rel="noopener">Google Sheets</a>.</li>
+            <li>In <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>, create a project and enable the Google Sheets and Google Drive APIs.</li>
+            <li>Create a service account, then select <strong>Keys → Add key → Create new key → JSON</strong>.</li>
+            <li>Upload that JSON file above and save the Sheet ID.</li>
+            <li>Share the spreadsheet as <strong>Editor</strong> with the service-account email shown above.</li>
+          </ol>
+        </details>
+
+        <details class="inline-help optional-panel">
+          <summary>Optional: LinkedIn, Upwork, or Telegram</summary>
+          <div class="grid optional-connections">
+            <label>Apify API token
+              <span class="sub-label">Needed only when LinkedIn or Upwork is enabled.</span>
+              <input id="apifyToken" type="password" autocomplete="new-password" placeholder="Paste a new token to save it" />
+              <span id="apifyState" class="connection-state"></span>
+            </label>
+            <label>Telegram bot token
+              <input id="telegramToken" type="password" autocomplete="new-password" placeholder="Paste a new token to save it" />
+              <span id="telegramTokenState" class="connection-state"></span>
+            </label>
+            <label>Telegram chat ID
+              <input id="telegramChatId" type="password" autocomplete="new-password" placeholder="Paste the chat ID" />
+              <span id="telegramChatState" class="connection-state"></span>
+            </label>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button id="btnSaveConnections" class="btn" type="button">Save connection details</button>
+          <span id="connectionStatus" class="status-msg"></span>
+        </div>
+      </div>
+
+      <h2>2. Tell Job Finder about you</h2>
+      <p class="hint">This is how I understand who you are and what you want. The more accurate it is, the better your matches. For boxes that say "one per line", press Enter between items.</p>
 
       <div class="card">
         <div class="grid">
@@ -124,7 +184,7 @@
       </div>
 
       <div class="card">
-        <h3>Your CV</h3>
+        <h3>3. Upload your CV</h3>
         <p class="hint">Upload your CV as a PDF, Word document, or text file. I read it to tailor your cover letter and CV tips.</p>
         <div class="upload">
           <input id="cvFile" type="file" accept=".pdf,.docx,.txt,.md" hidden />
@@ -135,7 +195,7 @@
       </div>
 
       <div class="card">
-        <h3>Search settings</h3>
+        <h3>4. Choose what to search for</h3>
         <p class="hint">These control what I look for. The defaults usually work well.</p>
         <div class="grid">
           <label>Words a job must mention <span class="sub-label">One per line. A job is skipped unless it mentions at least one — this keeps costs down.</span>
@@ -145,7 +205,7 @@
         </div>
 
         <label>What counts as a great fit?
-          <span class="sub-label">Every job I check is saved either way — this just sets which ones show up first, and which get starred in your spreadsheet.</span>
+          <span class="sub-label">Every job I check is saved either way — this just sets which ones show up first and count as great fits.</span>
         </label>
         <div class="slider-row">
           <input id="min_score" type="range" min="40" max="95" step="5" />
@@ -159,7 +219,7 @@
       </div>
 
       <div class="actions sticky-save">
-        <button id="btnSaveProfile" class="btn">💾 Save my settings</button>
+        <button id="btnSaveProfile" class="btn">💾 Save profile and search settings</button>
         <span id="saveStatus" class="status-msg"></span>
       </div>
 

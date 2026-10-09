@@ -10,10 +10,14 @@ apply assistant. Do not add an auto-submit route.
 
 from __future__ import annotations
 
+import json
+import os
 import sys
+import tempfile
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # Make the project root importable whether launched via run_ui.py or directly.
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,7 +28,7 @@ import yaml
 from flask import Flask, jsonify, render_template, request, send_file
 from flask.json.provider import DefaultJSONProvider
 
-from src.config import PROJECT_ROOT, load_config, mask, scrub
+from src.config import PROJECT_ROOT, load_config, scrub
 from src.models import Job
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -50,9 +54,18 @@ app.json = _BrowserSafeJSON(app)
 
 PROFILE_PATH = PROJECT_ROOT / "config" / "profile.yaml"
 SEARCH_PATH = PROJECT_ROOT / "config" / "search.yaml"
+ENV_PATH = PROJECT_ROOT / ".env"
+CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 CV_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+CONNECTION_FIELDS = {
+    "anthropic_key": "ANTHROPIC_API_KEY",
+    "google_sheet_id": "GOOGLE_SHEET_ID",
+    "apify_token": "APIFY_API_TOKEN",
+    "telegram_token": "TELEGRAM_BOT_TOKEN",
+    "telegram_chat_id": "TELEGRAM_CHAT_ID",
+}
 
 # Shared state for the background search run (single-user local app).
 SEARCH_STATE: dict = {"running": False, "log": [], "result": None, "error": None}
@@ -86,6 +99,79 @@ def _lines_to_list(text) -> list[str]:
         return [str(t).strip() for t in text if str(t).strip()]
     return [line.strip() for line in str(text or "").splitlines() if line.strip()]
 
+def _save_env_values(values: dict[str, str], clear: set[str] | None = None) -> None:
+    """Update selected .env values without ever returning or printing them."""
+    clear = clear or set()
+    allowed = set(CONNECTION_FIELDS.values()) | {"GOOGLE_SERVICE_ACCOUNT_FILE"}
+    updates = {key: str(value).strip() for key, value in values.items() if key in allowed}
+    for key, value in updates.items():
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"{key} cannot contain a line break")
+
+    lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
+    found: set[str] = set()
+    output: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            output.append(line)
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key in clear:
+            output.append(f"{key}=")
+            found.add(key)
+        elif key in updates and updates[key]:
+            output.append(f"{key}={updates[key]}")
+            found.add(key)
+        else:
+            output.append(line)
+    for key, value in updates.items():
+        if value and key not in found:
+            output.append(f"{key}={value}")
+    for key in clear - found:
+        if key in allowed:
+            output.append(f"{key}=")
+
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", newline="\n", dir=ENV_PATH.parent,
+        prefix=".env.", suffix=".tmp", delete=False,
+    ) as handle:
+        handle.write("\n".join(output).rstrip() + "\n")
+        temporary = Path(handle.name)
+    temporary.replace(ENV_PATH)
+    try:
+        ENV_PATH.chmod(0o600)
+    except OSError:
+        pass
+    for key, value in updates.items():
+        if value:
+            os.environ[key] = value
+    for key in clear:
+        os.environ.pop(key, None)
+
+
+def _connection_status() -> dict:
+    cfg = load_config()
+    credentials_exist = cfg.google_service_account_path.exists()
+    service_email = ""
+    if credentials_exist:
+        try:
+            service_email = str(json.loads(
+                cfg.google_service_account_path.read_text(encoding="utf-8")
+            ).get("client_email", ""))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+    return {
+        "anthropic_key": bool(cfg.anthropic_key),
+        "google_sheet_id": bool(cfg.google_sheet_id),
+        "google_credentials": credentials_exist,
+        "google_credentials_name": cfg.google_service_account_path.name if credentials_exist else "",
+        "google_service_email": service_email,
+        "apify_token": bool(cfg.apify_token),
+        "telegram_token": bool(cfg.telegram_token),
+        "telegram_chat_id": bool(cfg.telegram_chat_id),
+    }
 
 # --------------------------------------------------------------------------
 # Pages
@@ -100,13 +186,27 @@ def index():
 # running today's page against a server process started before the code
 # changed. Without this check that mismatch shows up as inexplicable errors.
 API_FEATURES = ["auto-draft", "tailored-cv", "downloads", "dashboard",
-                "dashboard-v2"]
+                "dashboard-v2", "guided-setup"]
 
 
 @app.route("/api/version", methods=["GET"])
 def version():
     import os
     return jsonify({"ok": True, "features": API_FEATURES, "pid": os.getpid()})
+
+
+@app.before_request
+def _reject_cross_site_mutations():
+    """Do not let an unrelated website change this localhost-only app."""
+    if request.method in {"GET", "HEAD", "OPTIONS"} or not request.path.startswith("/api/"):
+        return None
+    origin = request.headers.get("Origin")
+    if not origin:
+        return None
+    parsed = urlsplit(origin)
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return jsonify({"ok": False, "error": "Cross-site request blocked."}), 403
+    return None
 
 
 @app.after_request
@@ -117,6 +217,66 @@ def _no_store(response):
         response.headers["Cache-Control"] = "no-store, max-age=0"
     return response
 
+# --------------------------------------------------------------------------
+# Guided connection setup. Secret values are accepted but never returned.
+# The server is bound to localhost by scripts/run_ui.py.
+# --------------------------------------------------------------------------
+@app.route("/api/connections", methods=["GET"])
+def get_connections():
+    return jsonify({"ok": True, "configured": _connection_status()})
+
+
+@app.route("/api/connections", methods=["POST"])
+def save_connections():
+    try:
+        data = request.get_json(force=True) or {}
+        updates = {}
+        for field, env_name in CONNECTION_FIELDS.items():
+            value = str(data.get(field, "") or "").strip()
+            if value:
+                updates[env_name] = value
+        clear_fields = data.get("clear") or []
+        clear = {CONNECTION_FIELDS[field] for field in clear_fields
+                 if field in CONNECTION_FIELDS}
+        _save_env_values(updates, clear)
+        return jsonify({"ok": True, "configured": _connection_status()})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": scrub(str(exc))}), 400
+
+
+@app.route("/api/upload-google-credentials", methods=["POST"])
+def upload_google_credentials():
+    try:
+        uploaded = request.files.get("credentials")
+        if uploaded is None or not uploaded.filename:
+            return jsonify({"ok": False,
+                            "error": "Choose the JSON file downloaded from Google Cloud."}), 400
+        raw = uploaded.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            return jsonify({"ok": False,
+                            "error": "The credential file is unexpectedly large."}), 400
+        try:
+            payload = json.loads(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return jsonify({"ok": False, "error": "That is not a valid JSON file."}), 400
+        required = ("type", "project_id", "private_key", "client_email")
+        if payload.get("type") != "service_account" or any(not payload.get(k) for k in required):
+            return jsonify({"ok": False, "error":
+                "This is not a Google service-account JSON file. Download a JSON key for a service account."}), 400
+
+        CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
+        destination = CREDENTIALS_DIR / "service_account.json"
+        destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        try:
+            destination.chmod(0o600)
+        except OSError:
+            pass
+        _save_env_values({"GOOGLE_SERVICE_ACCOUNT_FILE":
+                          destination.relative_to(PROJECT_ROOT).as_posix()})
+        return jsonify({"ok": True, "filename": destination.name,
+                        "configured": _connection_status()})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": scrub(str(exc))}), 400
 
 # --------------------------------------------------------------------------
 # Profile + search settings
@@ -127,6 +287,11 @@ def get_profile():
     search = _load_yaml(SEARCH_PATH)
     req = profile.get("requirements", {}) or {}
     scoring = search.get("scoring", {}) or {}
+    cv_value = str(profile.get("cv_path", "") or "").strip()
+    cv_file = Path(cv_value) if cv_value else None
+    if cv_file is not None and not cv_file.is_absolute():
+        cv_file = PROJECT_ROOT / cv_file
+    visible_cv_path = cv_value if cv_file is not None and cv_file.is_file() else ""
     return jsonify({
         "name": profile.get("name", ""),
         "location": profile.get("location", ""),
@@ -137,7 +302,7 @@ def get_profile():
         "remote_only": bool(req.get("remote_only", True)),
         "min_salary": req.get("min_salary", ""),
         "locations_allowed": req.get("locations_allowed", []),
-        "cv_path": profile.get("cv_path", ""),
+        "cv_path": visible_cv_path,
         "keywords": search.get("keywords", []),
         "min_score": scoring.get("min_score", 70),
         "sources": search.get("sources", {}),
@@ -235,19 +400,31 @@ def status():
     enabled = cfg.enabled_sources()
     apify_needed = bool(enabled.get("linkedin") or enabled.get("upwork"))
     tg = cfg.telegram()
+    google_id_ready = bool(cfg.google_sheet_id)
+    google_file_ready = cfg.google_service_account_path.exists()
+    google_partly_configured = google_id_ready or google_file_ready
+    google_optional_detail = "optional — not connected"
     items = [
         {"name": "Claude API key", "ok": bool(cfg.anthropic_key),
-         "detail": mask(cfg.anthropic_key) if cfg.anthropic_key else "not set in .env"},
-        {"name": "Google Sheet ID", "ok": bool(cfg.google_sheet_id),
-         "detail": cfg.google_sheet_id or "not set in .env"},
-        {"name": "Service-account file", "ok": cfg.google_service_account_path.exists(),
-         "detail": cfg.google_service_account_path.name},
+         "detail": "configured" if cfg.anthropic_key else "not set"},
+        {"name": "Google Sheet ID (optional)",
+         "ok": google_id_ready if google_partly_configured else True,
+         "detail": ("configured" if google_id_ready else
+                    ("missing" if google_partly_configured else google_optional_detail))},
+        {"name": "Google credentials (optional)",
+         "ok": google_file_ready if google_partly_configured else True,
+         "detail": (cfg.google_service_account_path.name if google_file_ready else
+                    ("missing" if google_partly_configured else google_optional_detail))},
+        {"name": "Profile", "ok": bool(cfg.profile.get("summary") and cfg.profile.get("target_roles")),
+         "detail": "ready" if cfg.profile.get("summary") and cfg.profile.get("target_roles") else "add a summary and at least one target role"},
+        {"name": "Search keywords", "ok": bool(cfg.keywords()),
+         "detail": "ready" if cfg.keywords() else "add at least one keyword"},
         {"name": "Résumé / CV", "ok": cfg.cv_path.exists(),
-         "detail": cfg.cv_path.name},
+         "detail": cfg.cv_path.name if cfg.cv_path.exists() else "upload your CV"},
     ]
     if apify_needed:
         items.append({"name": "Apify token", "ok": bool(cfg.apify_token),
-                      "detail": mask(cfg.apify_token) if cfg.apify_token else "not set"})
+                      "detail": "configured" if cfg.apify_token else "not set"})
     if tg.get("enabled"):
         ok = bool(cfg.telegram_token and cfg.telegram_chat_id)
         items.append({"name": "Telegram", "ok": ok,
@@ -269,17 +446,21 @@ def check_live():
     except Exception as exc:  # noqa: BLE001
         results.append({"name": "Claude", "ok": False, "detail": scrub(str(exc))})
 
-    # Google Sheets
-    try:
-        from src.sheets import open_worksheet
-        ws = open_worksheet(cfg)
+    # Google Sheets (optional; local storage works without it).
+    if not cfg.google_sheets_ready():
         results.append({"name": "Google Sheet", "ok": True,
-                        "detail": f'opened "{ws.spreadsheet.title}"'})
-    except PermissionError:
-        results.append({"name": "Google Sheet", "ok": False,
-                        "detail": "403 — share the sheet with the service-account email (Editor)"})
-    except Exception as exc:  # noqa: BLE001
-        results.append({"name": "Google Sheet", "ok": False, "detail": scrub(str(exc))})
+                        "detail": "optional — not connected; jobs are saved locally"})
+    else:
+        try:
+            from src.sheets import open_worksheet
+            ws = open_worksheet(cfg)
+            results.append({"name": "Google Sheet", "ok": True,
+                            "detail": f'opened "{ws.spreadsheet.title}"'})
+        except PermissionError:
+            results.append({"name": "Google Sheet", "ok": False,
+                            "detail": "403 — share the sheet with the service-account email (Editor)"})
+        except Exception as exc:  # noqa: BLE001
+            results.append({"name": "Google Sheet", "ok": False, "detail": scrub(str(exc))})
 
     return jsonify({"results": results})
 
@@ -364,12 +545,34 @@ def search_status():
 
 
 # --------------------------------------------------------------------------
-# Matches (from the Google Sheet)
+# Matches (local storage, enriched from Google Sheets when connected)
 # --------------------------------------------------------------------------
 # The dashboard shows the AI's reasoning on each card, so the full text goes
 # out. The scoring prompt caps it at 1-3 sentences, so this stays small.
 MATCH_FIELDS = ("Date found", "Source", "Title", "Company", "Location",
                 "Recommendation", "Reasons", "Status", "Applied on", "URL")
+
+
+def _local_job_rows() -> list[dict]:
+    """Return browser rows from the local store used by every installation."""
+    from src.jobstore import load_store
+
+    rows = []
+    for record in load_store().values():
+        rows.append({
+            "Date found": record.get("date_found", ""),
+            "Source": record.get("source", ""),
+            "Title": record.get("title", ""),
+            "Company": record.get("company", ""),
+            "Location": record.get("location", ""),
+            "Score": record.get("score"),
+            "Recommendation": record.get("recommendation", ""),
+            "Reasons": record.get("reasons", ""),
+            "Status": record.get("status", "New"),
+            "Applied on": record.get("applied_on", ""),
+            "URL": record.get("url", ""),
+        })
+    return rows
 
 
 def _as_score(value):
@@ -411,24 +614,40 @@ def _counts(rows: list[dict], min_score: int) -> dict:
 @app.route("/api/matches", methods=["GET"])
 def matches():
     try:
-        from src.sheets import read_logged_jobs
-
         cfg = load_config()
         min_score = cfg.min_score()
-        rows = read_logged_jobs(cfg)
+        rows = _local_job_rows()
+        storage = "local"
+        warning = ""
+
+        # When Google sync is enabled, merge its editable summary fields over
+        # local rows while retaining any jobs a failed sync did not upload.
+        if cfg.google_sheets_ready():
+            try:
+                from src.sheets import read_logged_jobs
+
+                sheet_rows = read_logged_jobs(cfg)
+                by_url = {str(row.get("URL", "")).strip().lower(): row for row in rows}
+                for row in sheet_rows:
+                    key = str(row.get("URL", "")).strip().lower()
+                    if key and key in by_url:
+                        by_url[key].update(row)
+                    elif key:
+                        rows.append(row)
+                storage = "local+google"
+            except Exception as exc:  # noqa: BLE001
+                warning = "Google sync could not be read; showing jobs saved on this computer."
 
         slim = []
         for row in rows:
             item = {key: row.get(key, "") for key in MATCH_FIELDS}
-            # int or None, never "": the cards must tell "scored 0" apart from
-            # "we never got a score for this one".
             item["Score"] = _as_score(row.get("Score"))
             slim.append(item)
 
-        # Best first, unscored last.
         slim.sort(key=lambda r: (r["Score"] is None, -(r["Score"] or 0)))
         return jsonify({"ok": True, "rows": slim, "min_score": min_score,
-                        "counts": _counts(slim, min_score)})
+                        "counts": _counts(slim, min_score), "storage": storage,
+                        "warning": warning})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": scrub(str(exc))}), 400
 
@@ -531,7 +750,10 @@ def download(filename: str):
 def dashboard_link():
     from src.sheets import sheet_url
 
-    return jsonify({"ok": True, "url": sheet_url(load_config())})
+    cfg = load_config()
+    if not cfg.google_sheets_ready():
+        return jsonify({"ok": False, "error": "Google Sheets is not connected."}), 400
+    return jsonify({"ok": True, "url": sheet_url(cfg)})
 
 
 @app.route("/api/dashboard/refresh", methods=["POST"])
@@ -563,13 +785,19 @@ def mark_applied():
     try:
         data = request.get_json(force=True) or {}
         from src.jobstore import set_status
-        from src.sheets import update_status
 
         url = str(data.get("url", ""))
-        updated = update_status(load_config(), url, "Applied")
-        # Mirror it locally whatever the sheet said: this is what stops the
-        # job store evicting a job the user has actually applied to.
-        set_status(url, "Applied")
-        return jsonify({"ok": True, "updated": updated})
+        local_updated = set_status(url, "Applied")
+        sheet_updated = False
+        cfg = load_config()
+        if cfg.google_sheets_ready():
+            try:
+                from src.sheets import update_status
+
+                sheet_updated = update_status(cfg, url, "Applied")
+            except Exception:
+                pass
+        return jsonify({"ok": True, "updated": local_updated or sheet_updated,
+                        "sheet_updated": sheet_updated})
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": scrub(str(exc))}), 400
